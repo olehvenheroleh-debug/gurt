@@ -22,13 +22,14 @@ td,th{padding:7px;border-bottom:1px solid #ddd;text-align:left}
 </head>
 <body>
 <h1>Гурт 1.0</h1>
-<small>Тестова версія 0.6.1</small>
+<small>Тестова версія 0.7</small>
 <nav>
 <button onclick="show('receive')">Приймання</button>
 <button onclick="show('sale')">Продаж</button>
 <button onclick="show('stock')">Залишки</button>
 <button onclick="show('history')">Накладні</button>
 <button onclick="show('settings')">Налаштування</button>
+<button onclick="show('reports')">Звіти</button>
 </nav>
 <section id="main"></section>
 <script>
@@ -53,6 +54,7 @@ return true;
 function show(page){
  if(window.stopScan)window.stopScan();
 selected=null;
+if(page==='reports'){reportPage();return}
 if(page==='settings'){settings();return}
  if(page==='receive'){
 main.innerHTML=`
@@ -244,6 +246,12 @@ async function scan(action){
  file.onchange=async()=>{if(!file.files?.[0]||closed)return;photoBusy=true;status.textContent='Розпізнавання фото…';let url=URL.createObjectURL(file.files[0]);try{await loadScanner();let reader=new ZXingBrowser.BrowserMultiFormatReader();let img=new Image();img.src=url;await img.decode();let canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');let scale=Math.min(1,2400/Math.max(img.width,img.height));let w=Math.round(img.width*scale),h=Math.round(img.height*scale);let result;for(let angle of [0,90,180,270]){canvas.width=angle%180?h:w;canvas.height=angle%180?w:h;ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate(angle*Math.PI/180);ctx.drawImage(img,-w/2,-h/2,w,h);try{result=reader.decodeFromCanvas(canvas);if(result)break}catch(e){}}if(result)accept(result);else if(!closed)status.textContent='Фото: код не розпізнано. Спробуйте чіткіше фото або інший код.'}catch(e){if(!closed)status.textContent='Помилка фото: '+(e.message||e.name)}finally{URL.revokeObjectURL(url);photoBusy=false;file.value=''}};
  try{await loadScanner();if(closed)return;stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});if(closed){stream.getTracks().forEach(t=>t.stop());return}let track=stream.getVideoTracks()[0];try{if(track.getCapabilities?.().focusMode?.includes('continuous'))await track.applyConstraints({advanced:[{focusMode:'continuous'}]})}catch(e){};if(closed)return;let reader=new ZXingBrowser.BrowserMultiFormatReader(undefined,{delayBetweenScanAttempts:150,delayBetweenScanSuccess:500});controls=await reader.decodeFromStream(stream,video,(result,error)=>{if(closed||photoBusy)return;if(result){accept(result);return}attempts++;let now=Date.now();if(now-lastUpdate>900){lastUpdate=now;let name=error?.name||'Очікування';status.textContent=`Камера ${video.videoWidth}×${video.videoHeight}. Спроб: ${attempts}. ${/NotFound/i.test(name)?'Код ще не знайдено':name}`}});if(closed)controls.stop();else status.textContent='Камера працює. Наведіть на код.'}catch(e){if(!closed){stream?.getTracks().forEach(t=>t.stop());status.textContent='Помилка камери: '+(e.message||e.name)+'. Можна спробувати фото.'}}
 }
+function reportPage(){main.innerHTML=`<h2>Звіти</h2><label>Період</label><select id="rp" onchange="reportPeriod()"><option value="today">Сьогодні</option><option value="yesterday">Вчора</option><option value="week">Останні 7 днів</option><option value="month">Поточний місяць</option><option value="all">Увесь час</option><option value="custom">Довільний період</option></select><label>Від</label><input type="date" id="rf" onchange="el('rp').value='custom';reportList()"><label>До</label><input type="date" id="rt" onchange="el('rp').value='custom';reportList()"><label>ФОП</label><select id="rs" onchange="reportList()"><option value="">Усі</option><option value="none">Без ФОП</option>${db.sellers.map(x=>`<option value="${esc(x.id)}">${esc(x.short||x.name)}</option>`).join('')}</select><div id="reportresult"></div>`;reportPeriod()}
+function localDay(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function reportPeriod(){let p=val('rp'),d=new Date(),a=new Date(d);if(p==='custom')return reportList();if(p==='yesterday'){a.setDate(a.getDate()-1);d=a}if(p==='week')a.setDate(a.getDate()-6);if(p==='month')a.setDate(1);el('rf').value=p==='all'?'':localDay(a);el('rt').value=p==='all'?'':localDay(d);reportList()}
+function reportData(rows){let gross=0,net=0,grossUA=0,netUA=0,packs=0,pieces=0,active=0,cancelled=0,groups=new Map(),goods=new Map();for(let s of rows){let g=s.total,n=netTotal(s);gross+=g;net+=n;grossUA+=g*s.rate;netUA+=n*s.rate;if(s.cancelled)cancelled++;else if(s.items.some((p,j)=>p.qty>returned(s,j)))active++;let key=s.seller?.id||'none',v=groups.get(key)||{name:s.seller?.short||s.seller?.name||'Без ФОП',usd:0,uah:0};v.usd+=n;v.uah+=n*s.rate;groups.set(key,v);s.items.forEach((p,j)=>{let q=s.cancelled?0:p.qty-returned(s,j);if(q<=0)return;packs+=q;pieces+=q*p.units;let k=p.id||JSON.stringify([p.art,p.color,p.name]),x=goods.get(k)||{name:p.name,art:p.art,color:p.color,packs:0,pieces:0,usd:0};x.packs+=q;x.pieces+=q*p.units;x.usd+=q*p.units*p.price;goods.set(k,x)})}return {gross,net,grossUA,netUA,packs,pieces,active,cancelled,groups,goods}}
+function reportList(){let f=val('rf'),t=val('rt'),seller=val('rs');if(f&&t&&f>t){el('reportresult').textContent='Дата початку має бути не пізніше дати завершення.';return}let rows=db.sales.filter(s=>{let d=saleDay(s);return (!f||d&&d>=f)&&(!t||d&&d<=t)&&(!seller||(seller==='none'?!s.seller?.id:s.seller?.id===seller))}),r=reportData(rows),fmt=(u,h)=>`$${uaMoney(u)} / ${uaMoney(h)} грн`,stock=db.products.reduce((a,p)=>({packs:a.packs+p.qty,pieces:a.pieces+p.qty*p.units,value:a.value+p.qty*p.units*p.price}),{packs:0,pieces:0,value:0});el('reportresult').innerHTML=`<hr><h3>Продажі після повернень</h3><h2>${fmt(r.net,r.netUA)}</h2><p>Початкові продажі: ${fmt(r.gross,r.grossUA)}<br>Повернення та скасування: ${fmt(r.gross-r.net,r.grossUA-r.netUA)}<br>Накладних: ${rows.length} · з продажем: ${r.active} · скасованих: ${r.cancelled}<br>Продано: ${r.packs} рост. / ${r.pieces} шт.</p><small>Період визначається датою початкової накладної; враховано всі її повернення, навіть пізніші.</small><hr><h3>По ФОП</h3>${[...r.groups.values()].map(x=>`<p><b>${esc(x.name)}</b><br>${fmt(x.usd,x.uah)}</p>`).join('')||'Немає продажів'}<hr><h3>Найбільш продавані товари</h3><small>За кількістю штук після повернень</small>${[...r.goods.values()].sort((a,b)=>b.pieces-a.pieces).map(x=>`<p><b>${esc(x.name)}</b><br>Арт. ${esc(x.art)} ${esc(x.color)}<br>${x.packs} рост. / ${x.pieces} шт. · $${uaMoney(x.usd)}</p>`).join('')||'<p>Немає продажів</p>'}<hr><h3>Склад — поточні залишки</h3><p>${stock.packs} рост. / ${stock.pieces} шт.</p><h2>$${uaMoney(stock.value)}</h2><small>Усі товари, незалежно від періоду та ФОП. За поточними продажними цінами.</small>`}
+
 show('receive');
 </script>
 </body>
