@@ -22,7 +22,7 @@ td,th{padding:7px;border-bottom:1px solid #ddd;text-align:left}
 </head>
 <body>
 <h1>Гурт 1.0</h1>
-<small>Тестова версія 0.5.2</small>
+<small>Тестова версія 0.5.3</small>
 <nav>
 <button onclick="show('receive')">Приймання</button>
 <button onclick="show('sale')">Продаж</button>
@@ -58,10 +58,10 @@ if(page==='settings'){settings();return}
 main.innerHTML=`
 <h2>Приймання товару</h2>
 <label>Штрихкод</label>
-<input id="code" onchange="lookup()" onkeydown="if(event.key==='Enter'){event.preventDefault();lookup()}"><button onclick="scan('lookup')">Камера</button>
+<input id="code" oninput="selected=null" onchange="lookup('code')" onkeydown="if(event.key==='Enter'){event.preventDefault();lookup('code')}"><button onclick="scan('lookup')">Камера</button>
 <button onclick="lookup()">Знайти товар</button>
 <div id="matches"></div>
-<label>Артикул</label><input id="art">
+<label>Артикул</label><input id="art" oninput="selected=null;el('code').value=''" onchange="lookup('art')" onkeydown="if(event.key==='Enter'){event.preventDefault();lookup('art')}"><button onclick="lookup('art')">Знайти за артикулом</button>
 <label>Назва товару</label><input id="name">
 <label>Колір (необов'язково)</label><input id="color">
 <label>Штук у ростовці</label>
@@ -93,26 +93,29 @@ renderCart();
 }
 if(page==='history'){historyPage();}
 }
-function lookup(){
+function lookup(field){
 selected=null;
-let a=db.products.filter(p=>p.code===val('code'));
-el('matches').innerHTML=a.map(p=>`<button onclick="pick('${p.id}')">${esc(p.name)} ${esc(p.color)}</button>`).join('')+
-'<button onclick="newProduct()">Новий товар / колір</button>';
+let q=val(field|| (val('code')?'code':'art'));
+let a=q?db.products.filter(p=>String(p.code)===q||String(p.art)===q):[];
+el('matches').innerHTML=(a.length?'Виберіть товар / колір: ':'Товар не знайдено. ')+a.map(p=>`<button onclick="pick('${esc(p.id)}')">${esc(p.name)} · арт. ${esc(p.art)} · ${esc(p.color||'Без кольору')} · ${p.qty} рост.</button>`).join('')+'<button onclick="newProduct()">Новий товар / колір</button>';
 if(a.length===1)pick(a[0].id);
 }
 function newProduct(){
 selected=null;
-for(let k of ['art','name','color','price'])el(k).value='';
+for(let k of ['name','color','price'])el(k).value='';
+el('matches').innerHTML='Новий товар / колір';
 }
 function pick(id){
 let p=db.products.find(x=>x.id===id);
+if(!p)return;
 selected=id;
-for(let k of ['art','name','color','units','price'])el(k).value=p[k];
+for(let k of ['code','art','name','color','units','price'])el(k).value=p[k]??'';
 }
 function receive(){
 let p={code:val('code'),art:val('art'),name:val('name'),color:val('color'),units:num('units'),qty:num('qty'),price:num('price')};
 if(!p.code||!p.name||!p.art||!Number.isInteger(p.units)||p.units<1||!Number.isInteger(p.qty)||p.qty<1||!Number.isFinite(p.price)||p.price<=0)return alert('Перевірте всі поля');
 let old=db.products.find(x=>x.id===selected);
+if(!old){let same=db.products.filter(x=>x.code===p.code&&x.art===p.art&&(x.color||'').trim().toLowerCase()===p.color.toLowerCase()&&x.units===p.units);if(same.length>1)return alert('Знайдено дублікати. Виберіть товар зі списку');if(same.length===1)old=same[0];}
 if(old&&(old.units!==p.units||old.color!==p.color||old.code!==p.code))return alert('Створіть новий варіант товару');
 let backup=JSON.stringify(db);
 if(old){
