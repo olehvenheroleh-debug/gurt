@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Гурт 1.0</title>
+<style>
+*{box-sizing:border-box}
+body{font:17px system-ui;background:#f1f4f2;color:#183b32;margin:16px}
+button,input,select{font:inherit;padding:12px;border:1px solid #bbc8c1;border-radius:9px}
+button{background:#183b32;color:white;margin:4px}
+input,select{width:100%;margin:5px 0;background:white}
+nav{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+section{background:white;padding:16px;border-radius:12px;margin-top:12px}
+label{display:block;margin-top:10px}
+small{color:#52655d}
+table{width:100%;border-collapse:collapse}
+td,th{padding:7px;border-bottom:1px solid #ddd;text-align:left}
+@media print{nav,button,h1,small{display:none}body{background:white;color:black}section{padding:0}}
+</style>
+</head>
+<body>
+<h1>Гурт 1.0</h1>
+<small>Тестова версія 0.2</small>
+<nav>
+<button onclick="show('receive')">Приймання</button>
+<button onclick="show('sale')">Продаж</button>
+<button onclick="show('stock')">Залишки</button>
+<button onclick="show('history')">Накладні</button>
+</nav>
+<section id="main"></section>
+<script>
+let db;
+try{
+db=JSON.parse(localStorage.getItem('gurt-v1'))||{products:[],sales:[]};
+}catch(e){db={products:[],sales:[]}}
+let cart=[],selected=null;
+const main=document.getElementById('main');
+const el=id=>document.getElementById(id);
+const val=id=>el(id).value.trim();
+const num=id=>Number(val(id));
+const money=n=>Number(n).toFixed(2);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function save(){
+try{
+localStorage.setItem('gurt-v1',JSON.stringify(db));
+return true;
+}catch(e){alert('Помилка збереження');return false}
+}
+function show(page){
+selected=null;
+if(page==='receive'){
+main.innerHTML=`
+<h2>Приймання товару</h2>
+<label>Штрихкод</label>
+<input id="code" onchange="lookup()">
+<button onclick="lookup()">Знайти товар</button>
+<div id="matches"></div>
+<label>Артикул</label><input id="art">
+<label>Назва товару</label><input id="name">
+<label>Колір (необов'язково)</label><input id="color">
+<label>Штук у ростовці</label>
+<input id="units" type="number" min="1" value="4">
+<label>Кількість ростовок</label>
+<input id="qty" type="number" min="1" value="1">
+<label>Продажна ціна за штуку, $</label>
+<input id="price" type="number" step="0.01" min="0.01">
+<button onclick="receive()">Зберегти товар</button>`;
+}
+if(page==='stock'){
+main.innerHTML='<h2>Залишки товару</h2>'+
+(db.products.map(p=>`<p><b>${esc(p.name)}</b><br>
+Арт. ${esc(p.art)} ${esc(p.color)}<br>
+${p.qty} рост. / ${p.qty*p.units} шт.<br>
+Ціна: $${money(p.price)}</p><hr>`).join('')||'Товарів поки немає');
+}
+if(page==='sale'){
+main.innerHTML=`
+<h2>Продаж товару</h2>
+<label>Штрихкод або артикул</label>
+<input id="code" onchange="findSale()">
+<button onclick="findSale()">Знайти</button>
+<div id="matches"></div>
+<div id="cart"></div>
+<label>Покупець</label><input id="buyer">
+<label>Курс долара, грн</label>
+<input id="rate" type="number" step="0.01" placeholder="Введіть курс">
+<button onclick="finish()">Провести продаж</button>`;
+renderCart();
+}
+if(page==='history'){
+main.innerHTML='<h2>Накладні</h2>'+
+(db.sales.map((s,i)=>`<p><button onclick="invoice(${i})">№ ${i+1} · ${esc(s.date)} · $${money(s.total)}</button></p>`).join('')||'Продажів поки немає');
+}
+}
+function lookup(){
+selected=null;
+let a=db.products.filter(p=>p.code===val('code'));
+el('matches').innerHTML=a.map(p=>`<button onclick="pick('${p.id}')">${esc(p.name)} ${esc(p.color)}</button>`).join('')+
+'<button onclick="newProduct()">Новий товар / колір</button>';
+if(a.length===1)pick(a[0].id);
+}
+function newProduct(){
+selected=null;
+for(let k of ['art','name','color','price'])el(k).value='';
+}
+function pick(id){
+let p=db.products.find(x=>x.id===id);
+selected=id;
+for(let k of ['art','name','color','units','price'])el(k).value=p[k];
+}
+function receive(){
+let p={code:val('code'),art:val('art'),name:val('name'),color:val('color'),units:num('units'),qty:num('qty'),price:num('price')};
+if(!p.code||!p.name||!p.art||!Number.isInteger(p.units)||p.units<1||!Number.isInteger(p.qty)||p.qty<1||!Number.isFinite(p.price)||p.price<=0)return alert('Перевірте всі поля');
+let old=db.products.find(x=>x.id===selected);
+if(old&&(old.units!==p.units||old.color!==p.color||old.code!==p.code))return alert('Створіть новий варіант товару');
+let backup=JSON.stringify(db);
+if(old){
+old.qty+=p.qty;
+old.price=p.price;
+old.name=p.name;
+old.art=p.art;
+}else{
+db.products.push({...p,id:Date.now().toString(36)+Math.random().toString(36).slice(2)});
+}
+if(!save()){db=JSON.parse(backup);return}
+show('receive');
+alert('Товар прийнято!');
+}
+function findSale(){
+let q=val('code');
+el('matches').innerHTML=db.products.filter(p=>p.qty>0&&(p.code===q||p.art===q)).map(p=>`<button onclick="add('${p.id}')">${esc(p.name)} ${esc(p.color)} · ${p.qty} рост.</button>`).join('')||'Товар не знайдено';
+}
+function add(id){
+let p=db.products.find(x=>x.id===id);
+let c=cart.find(x=>x.id===id);
+if((c?.qty||0)>=p.qty)return alert('Недостатньо товару');
+if(c)c.qty++;
+else cart.push({...p,qty:1});
+renderCart();
+}
+function renderCart(){
+el('cart').innerHTML=cart.map((p,i)=>`<p>${esc(p.name)} ${esc(p.color)}<br>
+${p.qty} рост. × ${p.units} шт.<br>
+$${money(p.qty*p.units*p.price)}
+<button onclick="removeItem(${i})">−</button>
+<button onclick="add('${p.id}')">+</button></p>`).join('')+
+'<b>Разом: $'+money(cart.reduce((s,p)=>s+p.qty*p.units*p.price,0))+'</b>';
+}
+function removeItem(i){
+cart[i].qty--;
+if(cart[i].qty===0)cart.splice(i,1);
+renderCart();
+}
+function finish(){
+let rate=num('rate');
+if(!cart.length||!Number.isFinite(rate)||rate<=0)return alert('Перевірте товар і курс');
+if(cart.some(c=>db.products.find(p=>p.id===c.id).qty<c.qty))return alert('Недостатньо залишку');
+let s={date:new Date().toLocaleString('uk-UA'),buyer:val('buyer'),rate,items:cart,total:cart.reduce((s,p)=>s+p.qty*p.units*p.price,0)};
+let backup=JSON.stringify(db);
+cart.forEach(c=>db.products.find(p=>p.id===c.id).qty-=c.qty);
+db.sales.push(s);
+if(!save()){db=JSON.parse(backup);return}
+cart=[];
+invoice(db.sales.length-1);
+}
+function invoice(i){
+let s=db.sales[i];
+main.innerHTML=`<h2>Товарна накладна № ${i+1}</h2>
+<p>${esc(s.date)}<br>${esc(s.buyer)}</p>
+<table><tr><th>Товар</th><th>Шт.</th><th>$/шт.</th><th>Сума $</th></tr>
+${s.items.map(p=>`<tr><td>${esc(p.name)} ${esc(p.art)} ${esc(p.color)}</td><td>${p.qty*p.units}</td><td>${money(p.price)}</td><td>${money(p.qty*p.units*p.price)}</td></tr>`).join('')}
+</table>
+<p>Всього: ${s.items.reduce((n,p)=>n+p.qty*p.units,0)} шт.</p>
+<h3>Разом: $${money(s.total)}</h3>
+<p>Курс: ${s.rate}</p>
+<h2>${money(s.total*s.rate)} грн</h2>
+<button onclick="window.print()">Друк / PDF</button>`;
+}
+show('receive');
+</script>
+</body>
+</html>
