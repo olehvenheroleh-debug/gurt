@@ -22,7 +22,7 @@ td,th{padding:7px;border-bottom:1px solid #ddd;text-align:left}
 </head>
 <body>
 <h1>Гурт 1.0</h1>
-<small>Тестова версія 0.8</small>
+<small>Тестова версія 0.9</small>
 <div id="cloudbar" style="margin:10px 0"></div><nav id="appnav" hidden>
 <button onclick="show('receive')">Приймання</button>
 <button onclick="show('sale')">Продаж</button>
@@ -48,18 +48,19 @@ const money=n=>Number(n).toFixed(2);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cloud=window.supabase?.createClient('https://yzqkufiehzkfoalcjfdi.supabase.co','sb_publishable_tN80HeOWhKPL8u-NihLPWQ_L05-Vetx');
 let user=null, revision=null, busy=false, ready=false;
+let checking=false, remotePending=false;
 const localOriginal=JSON.parse(JSON.stringify(db));
 function lock(v){busy=v;document.body.inert=v;}
 function validDB(x){return x&&Array.isArray(x.products)&&Array.isArray(x.sales)&&Array.isArray(x.sellers)}
 function status(t){el('cloudbar').textContent=t; if(ready){let b=document.createElement('button');b.textContent='Оновити з хмари';b.onclick=loadCloud;el('cloudbar').append(b);let c=document.createElement('button');c.textContent='Вийти';c.onclick=logout;el('cloudbar').append(c)}}
 async function save(){
  if(!ready||busy)return false;lock(true);
- try{let payload={data:db,updated_at:new Date().toISOString(),version:revision+1};let r=await cloud.from('gurt_data').update(payload).eq('user_id',user.id).eq('version',revision).select('version').maybeSingle();if(r.error)throw r.error;if(!r.data)throw Error('База змінена на іншому пристрої. Оновіть з хмари та повторіть операцію.');revision=r.data.version;status('Хмара: збережено');return true}catch(e){status('Хмара: зміни не підтверджено');alert('Не вдалося підтвердити збереження. '+e.message+' Оновіть базу перед повтором.');return false}finally{lock(false)}
+ try{let payload={data:db,updated_at:new Date().toISOString(),version:revision+1};let r=await cloud.from('gurt_data').update(payload).eq('user_id',user.id).eq('version',revision).select('version').maybeSingle();if(r.error)throw r.error;if(!r.data)throw Error('База змінена на іншому пристрої. Оновіть з хмари та повторіть операцію.');revision=r.data.version;remotePending=false;status('Хмара: збережено');return true}catch(e){status('Хмара: зміни не підтверджено');alert('Не вдалося підтвердити збереження. '+e.message+' Оновіть базу перед повтором.');return false}finally{lock(false)}
 }
 function loginPage(){ready=false;el('appnav').hidden=true;status('Хмара: вхід потрібен');main.innerHTML='<h2>Вхід до Гурт</h2><label>Електронна пошта</label><input id="email" type="email" autocomplete="username"><label>Пароль</label><input id="password" type="password" autocomplete="current-password"><button onclick="login()">Увійти</button><p>Для роботи потрібен інтернет.</p>';}
 async function login(){if(!cloud)return alert('Бібліотека Supabase не завантажилась');let email=val('email'),password=el('password').value;lock(true);try{let r=await cloud.auth.signInWithPassword({email,password});if(r.error)throw r.error;user=r.data.user;}catch(e){alert(e.message);return}finally{lock(false)}await loadCloud()}
-async function logout(){if(!confirm('Вийти з програми?'))return;let r=await cloud.auth.signOut();if(r.error)return alert(r.error.message);user=null;db={products:[],sales:[],sellers:[]};cart=[];loginPage()}
-async function loadCloud(){if(busy)return;lock(true);ready=false;el('appnav').hidden=true;try{let r=await cloud.from('gurt_data').select('data,version').eq('user_id',user.id).maybeSingle();if(r.error)throw r.error;if(!r.data){main.innerHTML='<h2>Перший запуск</h2><p>Хмарна база порожня. Оберіть початкові дані.</p><button onclick="initCloud(true)">Перенести дані з цього браузера</button><button onclick="initCloud(false)">Створити порожню базу</button><p>Резервну копію JSON можна відновити після запуску.</p>';status('Хмара: ще не налаштована');return}if(!validDB(r.data.data))throw Error('Невідомий формат даних');db=r.data.data;revision=r.data.version;ready=true;cart=[];el('appnav').hidden=false;status('Хмара: підключено');show('receive')}catch(e){status('Хмара: помилка');main.innerHTML='<p>'+esc(e.message)+'</p><button onclick="loadCloud()">Повторити</button><button onclick="logout()">Вийти</button>'}finally{lock(false)}}
+async function logout(){if(busy)return;if(!confirm('Вийти з програми?'))return;let r=await cloud.auth.signOut();if(r.error)return alert(r.error.message);user=null;db={products:[],sales:[],sellers:[]};cart=[];loginPage()}
+async function loadCloud(){if(busy)return;lock(true);ready=false;el('appnav').hidden=true;try{let r=await cloud.from('gurt_data').select('data,version').eq('user_id',user.id).maybeSingle();if(r.error)throw r.error;if(!r.data){main.innerHTML='<h2>Перший запуск</h2><p>Хмарна база порожня. Оберіть початкові дані.</p><button onclick="initCloud(true)">Перенести дані з цього браузера</button><button onclick="initCloud(false)">Створити порожню базу</button><p>Резервну копію JSON можна відновити після запуску.</p>';status('Хмара: ще не налаштована');return}if(!validDB(r.data.data))throw Error('Невідомий формат даних');db=r.data.data;revision=r.data.version;remotePending=false;ready=true;cart=[];el('appnav').hidden=false;status('Хмара: підключено');show('receive')}catch(e){status('Хмара: помилка');main.innerHTML='<p>'+esc(e.message)+'</p><button onclick="loadCloud()">Повторити</button><button onclick="logout()">Вийти</button>'}finally{lock(false)}}
 async function initCloud(useLocal){if(busy)return;if(!confirm('Створити початкову хмарну базу?'))return;lock(true);try{let data=useLocal?localOriginal:{products:[],sales:[],sellers:[],adjustments:[]};let r=await cloud.from('gurt_data').insert({user_id:user.id,data,version:1});if(r.error)throw r.error}catch(e){alert(e.message)}finally{lock(false)}await loadCloud()}
 async function boot(){loginPage();if(!cloud)return;try{let r=await cloud.auth.getUser();if(r.data.user){user=r.data.user;await loadCloud()}}catch(e){status('Хмара: помилка підключення')}}
 function show(page){
@@ -263,6 +264,36 @@ function reportPeriod(){let p=val('rp'),d=new Date(),a=new Date(d);if(p==='custo
 function reportData(rows){let gross=0,net=0,grossUA=0,netUA=0,packs=0,pieces=0,active=0,cancelled=0,groups=new Map(),goods=new Map();for(let s of rows){let g=s.total,n=netTotal(s);gross+=g;net+=n;grossUA+=g*s.rate;netUA+=n*s.rate;if(s.cancelled)cancelled++;else if(s.items.some((p,j)=>p.qty>returned(s,j)))active++;let key=s.seller?.id||'none',v=groups.get(key)||{name:s.seller?.short||s.seller?.name||'Без ФОП',usd:0,uah:0};v.usd+=n;v.uah+=n*s.rate;groups.set(key,v);s.items.forEach((p,j)=>{let q=s.cancelled?0:p.qty-returned(s,j);if(q<=0)return;packs+=q;pieces+=q*p.units;let k=p.id||JSON.stringify([p.art,p.color,p.name]),x=goods.get(k)||{name:p.name,art:p.art,color:p.color,packs:0,pieces:0,usd:0};x.packs+=q;x.pieces+=q*p.units;x.usd+=q*p.units*p.price;goods.set(k,x)})}return {gross,net,grossUA,netUA,packs,pieces,active,cancelled,groups,goods}}
 function reportList(){let f=val('rf'),t=val('rt'),seller=val('rs');if(f&&t&&f>t){el('reportresult').textContent='Дата початку має бути не пізніше дати завершення.';return}let rows=db.sales.filter(s=>{let d=saleDay(s);return (!f||d&&d>=f)&&(!t||d&&d<=t)&&(!seller||(seller==='none'?!s.seller?.id:s.seller?.id===seller))}),r=reportData(rows),fmt=(u,h)=>`$${uaMoney(u)} / ${uaMoney(h)} грн`,stock=db.products.reduce((a,p)=>({packs:a.packs+p.qty,pieces:a.pieces+p.qty*p.units,value:a.value+p.qty*p.units*p.price}),{packs:0,pieces:0,value:0});el('reportresult').innerHTML=`<hr><h3>Продажі після повернень</h3><h2>${fmt(r.net,r.netUA)}</h2><p>Початкові продажі: ${fmt(r.gross,r.grossUA)}<br>Повернення та скасування: ${fmt(r.gross-r.net,r.grossUA-r.netUA)}<br>Накладних: ${rows.length} · з продажем: ${r.active} · скасованих: ${r.cancelled}<br>Продано: ${r.packs} рост. / ${r.pieces} шт.</p><small>Період визначається датою початкової накладної; враховано всі її повернення, навіть пізніші.</small><hr><h3>По ФОП</h3>${[...r.groups.values()].map(x=>`<p><b>${esc(x.name)}</b><br>${fmt(x.usd,x.uah)}</p>`).join('')||'Немає продажів'}<hr><h3>Найбільш продавані товари</h3><small>За кількістю штук після повернень</small>${[...r.goods.values()].sort((a,b)=>b.pieces-a.pieces).map(x=>`<p><b>${esc(x.name)}</b><br>Арт. ${esc(x.art)} ${esc(x.color)}<br>${x.packs} рост. / ${x.pieces} шт. · $${uaMoney(x.usd)}</p>`).join('')||'<p>Немає продажів</p>'}<hr><h3>Склад — поточні залишки</h3><p>${stock.packs} рост. / ${stock.pieces} шт.</p><h2>$${uaMoney(stock.value)}</h2><small>Усі товари, незалежно від періоду та ФОП. За поточними продажними цінами.</small>`}
 
+// Background reads never replace data underneath an editable form.
+async function autoSync(){
+ if(!ready||!user||busy||checking||document.hidden)return;
+ checking=true;const uid=user.id, base=revision;
+ try{
+  const r=await cloud.from('gurt_data').select('data,version').eq('user_id',uid).maybeSingle();
+  if(!ready||busy||user?.id!==uid||revision!==base)return;
+  if(r.error)throw r.error;
+  if(!r.data||!validDB(r.data.data))throw Error('База недоступна');
+  if(r.data.version===base){if(!remotePending)status('Хмара: підключено');return;}
+  const stock=!!el('stocklist'), history=!!el('hl'), report=!!el('reportresult');
+  if(cart.length||!(stock||history||report)){
+   remotePending=true;status('Хмара: є нові дані. Завершіть або скасуйте введення та оновіть базу.');return;
+  }
+  db=r.data.data;revision=r.data.version;remotePending=false;
+  if(stock)stockList();
+  if(history||report){
+   const ids=history?['hq','hs','hf','ht']:['rp','rf','rt','rs'];
+   const values=ids.map(id=>el(id).value);
+   if(history)historyPage();else reportPage();
+   ids.forEach((id,i)=>{el(id).value=values[i];});
+   if(history)historyList();else reportList();
+  }
+  status('Хмара: автоматично оновлено');
+ }catch(e){if(ready&&!busy&&user?.id===uid&&revision===base)status('Хмара: не вдалося перевірити зміни');}
+ finally{checking=false;}
+}
+setInterval(autoSync,5000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)autoSync()});
+window.addEventListener('focus',autoSync);
 boot();
 </script>
 </body>
