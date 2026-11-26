@@ -21,12 +21,13 @@ td,th{padding:7px;border-bottom:1px solid #ddd;text-align:left}
 </head>
 <body>
 <h1>Гурт 1.0</h1>
-<small>Тестова версія 0.3</small>
+<small>Тестова версія 0.4</small>
 <nav>
 <button onclick="show('receive')">Приймання</button>
 <button onclick="show('sale')">Продаж</button>
 <button onclick="show('stock')">Залишки</button>
 <button onclick="show('history')">Накладні</button>
+<button onclick="show('settings')">Налаштування</button>
 </nav>
 <section id="main"></section>
 <script>
@@ -34,6 +35,7 @@ let db;
 try{
 db=JSON.parse(localStorage.getItem('gurt-v1'))||{products:[],sales:[]};
 }catch(e){db={products:[],sales:[]}}
+db.sellers ||= [];
 let cart=[],selected=null;
 const main=document.getElementById('main');
 const el=id=>document.getElementById(id);
@@ -49,11 +51,12 @@ return true;
 }
 function show(page){
 selected=null;
-if(page==='receive'){
+if(page==='settings'){settings();return}
+ if(page==='receive'){
 main.innerHTML=`
 <h2>Приймання товару</h2>
 <label>Штрихкод</label>
-<input id="code" onchange="lookup()">
+<input id="code" onchange="lookup()"><button onclick="scan('lookup')">Камера</button>
 <button onclick="lookup()">Знайти товар</button>
 <div id="matches"></div>
 <label>Артикул</label><input id="art">
@@ -68,21 +71,19 @@ main.innerHTML=`
 <button onclick="receive()">Зберегти товар</button>`;
 }
 if(page==='stock'){
-main.innerHTML='<h2>Залишки товару</h2>'+
-(db.products.map(p=>`<p><b>${esc(p.name)}</b><br>
-Арт. ${esc(p.art)} ${esc(p.color)}<br>
-${p.qty} рост. / ${p.qty*p.units} шт.<br>
-Ціна: $${money(p.price)}</p><hr>`).join('')||'Товарів поки немає');
+main.innerHTML='<h2>Залишки товару</h2><input id="stockquery" placeholder="Назва, артикул, штрихкод" oninput="stockList()"><div id="stocklist"></div>';stockList();
 }
 if(page==='sale'){
 main.innerHTML=`
 <h2>Продаж товару</h2>
 <label>Штрихкод або артикул</label>
-<input id="code" onchange="findSale()">
+<input id="code" onchange="findSale()"><button onclick="scan('findSale')">Камера</button>
 <button onclick="findSale()">Знайти</button>
 <div id="matches"></div>
 <div id="cart"></div>
-<label>Покупець</label><input id="buyer">
+<label>Продавець</label><select id="seller"><option value="">Не вибрано</option>${db.sellers.filter(x=>!x.inactive).map(x=>`<option value="${esc(x.id)}">${esc(x.short||x.name)}</option>`).join('')}</select>
+<label>Тип накладної</label><select id="kind" onchange="el('buyerextra').hidden=this.value==='normal'"><option value="normal">Звичайна</option><option value="official">Офіційна видаткова</option></select>
+<label>Покупець</label><input id="buyer"><div id="buyerextra" hidden><label>ІПН / код покупця (за наявності)</label><input id="buyerid"><label>Адреса покупця (за потреби)</label><input id="buyeraddress"></div>
 <label>Курс долара, грн</label>
 <input id="rate" type="number" step="0.01" placeholder="Введіть курс">
 <button onclick="finish()">Провести продаж</button>`;
@@ -145,7 +146,7 @@ el('cart').innerHTML=cart.map((p,i)=>`<p>${esc(p.name)} ${esc(p.color)}<br>
 <input id="cartqty${i}" type="number" inputmode="numeric" min="1" max="${db.products.find(x=>x.id===p.id).qty}" step="1" value="${p.qty}" onchange="setQty(${i},this.value)">
 <span id="lineqty${i}">${p.qty} рост. × ${p.units} шт. = ${p.qty*p.units} шт.</span><br>
 <span id="linesum${i}">$${money(p.qty*p.units*p.price)}</span>
-<button onclick="removeItem(${i})">−</button>
+<button onclick="removeItem(${i})">−</button><button onclick="cart.splice(${i},1);renderCart()">Видалити</button>
 <button onclick="add('${p.id}')">+</button></p>`).join('')+
 '<b id="carttotal">Разом: $'+money(cart.reduce((s,p)=>s+p.qty*p.units*p.price,0))+'</b>';
 }
@@ -170,15 +171,18 @@ function finish(){
 let rate=num('rate');
 if(!cart.length||!Number.isFinite(rate)||rate<=0)return alert('Перевірте товар і курс');
 if(cart.some(c=>db.products.find(p=>p.id===c.id).qty<c.qty))return alert('Недостатньо залишку');
-let s={date:new Date().toLocaleString('uk-UA'),buyer:val('buyer'),rate,items:cart,total:cart.reduce((s,p)=>s+p.qty*p.units*p.price,0)};
+let seller=db.sellers.find(x=>x.id===val('seller'));
+ if(val('kind')==='official'&&(!seller||!val('buyer')))return alert('Виберіть ФОП та введіть покупця');
+ let s={seller:seller?{...seller}:null,kind:val('kind'),buyerid:val('buyerid'),buyeraddress:val('buyeraddress'),date:new Date().toLocaleString('uk-UA'),buyer:val('buyer'),rate,items:cart,total:cart.reduce((s,p)=>s+p.qty*p.units*p.price,0)};
 let backup=JSON.stringify(db);
 cart.forEach(c=>db.products.find(p=>p.id===c.id).qty-=c.qty);
 db.sales.push(s);
+ if(s.kind==='official')assignOfficial(s,seller);
 if(!save()){db=JSON.parse(backup);return}
 cart=[];
-invoice(db.sales.length-1);
+invoice(db.sales.length-1,s.kind);
 }
-function invoice(i){
+function invoice(i,kind){
 let s=db.sales[i];
 main.innerHTML=`<h2>Товарна накладна № ${i+1}</h2>
 <p>${esc(s.date)}<br>${esc(s.buyer)}</p>
@@ -189,8 +193,23 @@ ${s.items.map(p=>`<tr><td>${esc(p.name)} ${esc(p.art)} ${esc(p.color)}</td><td>$
 <h3>Разом: $${money(s.total)}</h3>
 <p>Курс: ${s.rate}</p>
 <h2>${money(s.total*s.rate)} грн</h2>
-<button onclick="window.print()">Друк / PDF</button>`;
+<button onclick="printDoc(${i},false)">Друк / PDF</button><button onclick="makeOfficial(${i})">Офіційна накладна</button>`;
 }
+
+function stockList(){let q=val('stockquery').toLowerCase();el('stocklist').innerHTML=db.products.filter(p=>[p.name,p.art,p.code,p.color].join(' ').toLowerCase().includes(q)).map(p=>`<p><b>${esc(p.name)}</b><br>Арт. ${esc(p.art)} ${esc(p.color)}<br>${p.qty} рост. / ${p.qty*p.units} шт.<br>Ціна: $${money(p.price)}</p><hr>`).join('')||'Товарів не знайдено'}
+function settings(){main.innerHTML=`<h2>Налаштування</h2><h3>Продавці (ФОП)</h3>${db.sellers.map((x,i)=>`<p><button onclick="sellerForm(${i})">${esc(x.short||x.name)} ${x.inactive?'(неактивний)':''}</button></p>`).join('')}<button onclick="sellerForm(-1)">Додати ФОП</button><hr><h3>Резервна копія</h3><button onclick="exportDB()">Зберегти копію</button><label>Відновити з файлу (замінює поточну базу)</label><input type="file" accept=".json,application/json" onchange="importDB(this)">`}
+function sellerForm(i){let x=db.sellers[i]||{};main.innerHTML=`<h2>Реквізити ФОП</h2>${[['short','Коротка назва'],['name','Повне ПІБ'],['tax','РНОКПП'],['address','Адреса'],['iban','IBAN (необов’язково)'],['bank','Банк (необов’язково)']].map(([k,l])=>`<label>${l}</label><input id="f_${k}" value="${esc(x[k])}">`).join('')}<label>Наступний номер видаткової накладної</label><input id="f_next" type="number" min="1" value="${x.next||1}"><p>Статус: Без ПДВ</p><label><input style="width:auto" type="checkbox" id="inactive" ${x.inactive?'checked':''}> Неактивний</label><button onclick="saveSeller(${i})">Зберегти</button><button onclick="settings()">Назад</button>`}
+function saveSeller(i){let x={...db.sellers[i]};for(let k of ['short','name','tax','address','iban','bank'])x[k]=val('f_'+k);x.next=num('f_next');x.inactive=el('inactive').checked;if(!x.name||!x.tax||!Number.isInteger(x.next)||x.next<1)return alert('Заповніть ПІБ, РНОКПП та номер');x.id=x.id||Date.now().toString(36)+Math.random().toString(36).slice(2);if(db.sales.some(s=>s.seller?.id===x.id&&s.officialNo>=x.next))return alert('Номер має бути більшим за вже використані');let old=JSON.stringify(db);if(i<0)db.sellers.push(x);else db.sellers[i]=x;if(!save()){db=JSON.parse(old);return}settings()}
+function assignOfficial(s,x){s.officialNo=x.next++;s.seller={...x};}
+function makeOfficial(i){let s=db.sales[i];if(s.officialNo)return officialInvoice(i);main.innerHTML=`<h2>Офіційна накладна</h2><label>ФОП</label><select id="oseller"><option value="">Виберіть</option>${db.sellers.filter(x=>!x.inactive||x.id===s.seller?.id).map(x=>`<option value="${esc(x.id)}" ${x.id===s.seller?.id?'selected':''}>${esc(x.short||x.name)}</option>`).join('')}</select><label>Покупець</label><input id="obuyer" value="${esc(s.buyer)}"><label>ІПН / код покупця</label><input id="otax" value="${esc(s.buyerid)}"><label>Адреса покупця</label><input id="oaddress" value="${esc(s.buyeraddress)}"><button onclick="issueOfficial(${i})">Сформувати без списання товару</button><button onclick="invoice(${i},'normal')">Назад</button>`}
+function issueOfficial(i){let x=db.sellers.find(x=>x.id===val('oseller')),s=db.sales[i];if(!x||!val('obuyer'))return alert('Виберіть ФОП та покупця');if(s.officialNo)return officialInvoice(i);let old=JSON.stringify(db);s.officialBuyer=val('obuyer');s.buyerid=val('otax');s.buyeraddress=val('oaddress');assignOfficial(s,x);if(!save()){db=JSON.parse(old);return}officialInvoice(i)}
+function officialInvoice(i){let s=db.sales[i],x=s.seller;let rows=s.items.map(p=>{let qty=p.qty*p.units,price=Math.round(p.price*s.rate*100)/100;return {p,qty,price,sum:Math.round(qty*price*100)/100}});let total=rows.reduce((a,r)=>a+r.sum,0);main.innerHTML=`<h2>Видаткова накладна № ${s.officialNo}</h2><p>Дата: ${esc(s.date)}</p><p><b>Постачальник:</b> ФОП ${esc(x.name)}<br>РНОКПП: ${esc(x.tax)}${x.address?'<br>Адреса: '+esc(x.address):''}${x.iban?'<br>IBAN: '+esc(x.iban):''}${x.bank?'<br>Банк: '+esc(x.bank):''}</p><p><b>Покупець:</b> ${esc(s.officialBuyer||s.buyer)}${s.buyerid?'<br>Код: '+esc(s.buyerid):''}${s.buyeraddress?'<br>Адреса: '+esc(s.buyeraddress):''}</p><table><tr><th>Товар</th><th>Од.</th><th>К-ть</th><th>Ціна, грн</th><th>Сума, грн</th></tr>${rows.map(r=>`<tr><td>${esc(r.p.name)} ${esc(r.p.art)} ${esc(r.p.color)}</td><td>шт.</td><td>${r.qty}</td><td>${money(r.price)}</td><td>${money(r.sum)}</td></tr>`).join('')}</table><p>Без ПДВ</p><h3>Всього: ${money(total)} грн</h3><p>Сума прописом: ${wordsMoney(total)}</p><p>Відпустив: __________________</p><p>Отримав: __________________</p><button onclick="printDoc(${i},true)">Друк / PDF</button><button onclick="invoice(${i},'normal')">Звичайна накладна</button>`}
+function wordsMoney(n){let a=['','один','два','три','чотири','п’ять','шість','сім','вісім','дев’ять'],b=['десять','одинадцять','дванадцять','тринадцять','чотирнадцять','п’ятнадцять','шістнадцять','сімнадцять','вісімнадцять','дев’ятнадцять'],t=['','','двадцять','тридцять','сорок','п’ятдесят','шістдесят','сімдесят','вісімдесят','дев’яносто'],h=['','сто','двісті','триста','чотириста','п’ятсот','шістсот','сімсот','вісімсот','дев’ятсот'];let form=(v,f)=>f[v%100>=11&&v%100<=14?2:v%10===1?0:v%10>=2&&v%10<=4?1:2];let part=(v,f)=>[h[Math.floor(v/100)],v%100>=10&&v%100<20?b[v%10]:[t[Math.floor(v%100/10)],f&&v%10===1?'одна':f&&v%10===2?'дві':a[v%10]].filter(Boolean).join(' ')].filter(Boolean).join(' ');let cents=Math.round(n*100),v=Math.floor(cents/100),out=[],z=v;let scales=[null,['тисяча','тисячі','тисяч'],['мільйон','мільйони','мільйонів'],['мільярд','мільярди','мільярдів']];for(let j=0;z&&j<4;j++,z=Math.floor(z/1000)){let k=z%1000;if(k)out.unshift(part(k,j<=1)+(j?' '+form(k,scales[j]):''))}return (out.join(' ')||'нуль')+' '+form(v,['гривня','гривні','гривень'])+' '+String(cents%100).padStart(2,'0')+' коп.'}
+function printDoc(i,official){let s=db.sales[i];document.title=(official?'Видаткова':'Накладна')+' '+(official?s.officialNo:i+1)+' '+(s.officialBuyer||s.buyer||'');window.print()}
+function exportDB(){let u=URL.createObjectURL(new Blob([JSON.stringify(db,null,2)],{type:'application/json'}));let a=document.createElement('a');a.href=u;a.download='gurt-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),3000)}
+async function importDB(input){try{let x=JSON.parse(await input.files[0].text());if(!Array.isArray(x.products)||!Array.isArray(x.sales)||!x.products.every(p=>typeof p.id==='string'&&/^[a-z0-9]+$/.test(p.id)&&Number.isInteger(p.qty)&&p.qty>=0&&Number.isInteger(p.units)&&p.units>0&&Number.isFinite(p.price))||!x.sales.every(s=>Array.isArray(s.items)&&Number.isFinite(s.rate)&&Number.isFinite(s.total))|| (x.sellers&&!Array.isArray(x.sellers)))throw Error();if(!confirm('Замінити всю поточну базу?'))return;let old=db;db=x;db.sellers||=[];if(!save()){db=old;return}cart=[];settings();alert('Копію відновлено')}catch(e){alert('Не вдалося прочитати копію')}}
+async function scan(action){if(!('BarcodeDetector' in window)){alert('Цей браузер не підтримує вбудоване сканування. Введіть штрихкод вручну або скористайтеся зовнішнім сканером.');return}let stream,wrap=document.createElement('div');try{let detector=new BarcodeDetector();stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});let video=document.createElement('video');video.playsInline=true;video.muted=true;video.srcObject=stream;video.style.width='100%';let stop=()=>{stream.getTracks().forEach(t=>t.stop());wrap.remove()};let btn=document.createElement('button');btn.textContent='Закрити камеру';btn.onclick=stop;wrap.append(video,btn);main.prepend(wrap);await video.play();while(wrap.isConnected){let found=await detector.detect(video);if(found.length){el('code').value=found[0].rawValue;stop();action==='lookup'?lookup():findSale();break}await new Promise(r=>setTimeout(r,200))}stop()}catch(e){stream?.getTracks().forEach(t=>t.stop());wrap.remove();alert('Камера недоступна')}}
+
 show('receive');
 </script>
 </body>
