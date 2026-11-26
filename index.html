@@ -21,7 +21,7 @@ td,th{padding:7px;border-bottom:1px solid #ddd;text-align:left}
 </head>
 <body>
 <h1>Гурт 1.0</h1>
-<small>Тестова версія 0.2</small>
+<small>Тестова версія 0.3</small>
 <nav>
 <button onclick="show('receive')">Приймання</button>
 <button onclick="show('sale')">Продаж</button>
@@ -141,11 +141,25 @@ renderCart();
 }
 function renderCart(){
 el('cart').innerHTML=cart.map((p,i)=>`<p>${esc(p.name)} ${esc(p.color)}<br>
-${p.qty} рост. × ${p.units} шт.<br>
-$${money(p.qty*p.units*p.price)}
+<label for="cartqty${i}">Кількість ростовок (наявно: ${db.products.find(x=>x.id===p.id).qty})</label>
+<input id="cartqty${i}" type="number" inputmode="numeric" min="1" max="${db.products.find(x=>x.id===p.id).qty}" step="1" value="${p.qty}" onchange="setQty(${i},this.value)">
+<span id="lineqty${i}">${p.qty} рост. × ${p.units} шт. = ${p.qty*p.units} шт.</span><br>
+<span id="linesum${i}">$${money(p.qty*p.units*p.price)}</span>
 <button onclick="removeItem(${i})">−</button>
 <button onclick="add('${p.id}')">+</button></p>`).join('')+
-'<b>Разом: $'+money(cart.reduce((s,p)=>s+p.qty*p.units*p.price,0))+'</b>';
+'<b id="carttotal">Разом: $'+money(cart.reduce((s,p)=>s+p.qty*p.units*p.price,0))+'</b>';
+}
+function setQty(i,value){
+let p=cart[i], q=Number(value), stock=db.products.find(x=>x.id===p.id).qty;
+if(!Number.isInteger(q)||q<1||q>stock){
+el('cartqty'+i).value=p.qty;
+alert('Введіть цілу кількість від 1 до '+stock);
+return;
+}
+p.qty=q;
+el('lineqty'+i).textContent=`${q} рост. × ${p.units} шт. = ${q*p.units} шт.`;
+el('linesum'+i).textContent='$'+money(q*p.units*p.price);
+el('carttotal').textContent='Разом: $'+money(cart.reduce((s,p)=>s+p.qty*p.units*p.price,0));
 }
 function removeItem(i){
 cart[i].qty--;
