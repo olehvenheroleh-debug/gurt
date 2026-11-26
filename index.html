@@ -22,7 +22,7 @@ td,th{padding:7px;border-bottom:1px solid #ddd;text-align:left}
 </head>
 <body>
 <h1>Гурт 1.0</h1>
-<small>Тестова версія 0.9</small>
+<small>Тестова версія 0.9.1</small>
 <div id="cloudbar" style="margin:10px 0"></div><nav id="appnav" hidden>
 <button onclick="show('receive')">Приймання</button>
 <button onclick="show('sale')">Продаж</button>
@@ -52,7 +52,7 @@ let checking=false, remotePending=false;
 const localOriginal=JSON.parse(JSON.stringify(db));
 function lock(v){busy=v;document.body.inert=v;}
 function validDB(x){return x&&Array.isArray(x.products)&&Array.isArray(x.sales)&&Array.isArray(x.sellers)}
-function status(t){el('cloudbar').textContent=t; if(ready){let b=document.createElement('button');b.textContent='Оновити з хмари';b.onclick=loadCloud;el('cloudbar').append(b);let c=document.createElement('button');c.textContent='Вийти';c.onclick=logout;el('cloudbar').append(c)}}
+function status(t){el('cloudbar').textContent=t; if(ready){let b=document.createElement('button');b.textContent='Оновити з хмари';b.onclick=()=>loadCloud();el('cloudbar').append(b);let c=document.createElement('button');c.textContent='Вийти';c.onclick=logout;el('cloudbar').append(c)}}
 async function save(){
  if(!ready||busy)return false;lock(true);
  try{let payload={data:db,updated_at:new Date().toISOString(),version:revision+1};let r=await cloud.from('gurt_data').update(payload).eq('user_id',user.id).eq('version',revision).select('version').maybeSingle();if(r.error)throw r.error;if(!r.data)throw Error('База змінена на іншому пристрої. Оновіть з хмари та повторіть операцію.');revision=r.data.version;remotePending=false;status('Хмара: збережено');return true}catch(e){status('Хмара: зміни не підтверджено');alert('Не вдалося підтвердити збереження. '+e.message+' Оновіть базу перед повтором.');return false}finally{lock(false)}
@@ -60,7 +60,7 @@ async function save(){
 function loginPage(){ready=false;el('appnav').hidden=true;status('Хмара: вхід потрібен');main.innerHTML='<h2>Вхід до Гурт</h2><label>Електронна пошта</label><input id="email" type="email" autocomplete="username"><label>Пароль</label><input id="password" type="password" autocomplete="current-password"><button onclick="login()">Увійти</button><p>Для роботи потрібен інтернет.</p>';}
 async function login(){if(!cloud)return alert('Бібліотека Supabase не завантажилась');let email=val('email'),password=el('password').value;lock(true);try{let r=await cloud.auth.signInWithPassword({email,password});if(r.error)throw r.error;user=r.data.user;}catch(e){alert(e.message);return}finally{lock(false)}await loadCloud()}
 async function logout(){if(busy)return;if(!confirm('Вийти з програми?'))return;let r=await cloud.auth.signOut();if(r.error)return alert(r.error.message);user=null;db={products:[],sales:[],sellers:[]};cart=[];loginPage()}
-async function loadCloud(){if(busy)return;lock(true);ready=false;el('appnav').hidden=true;try{let r=await cloud.from('gurt_data').select('data,version').eq('user_id',user.id).maybeSingle();if(r.error)throw r.error;if(!r.data){main.innerHTML='<h2>Перший запуск</h2><p>Хмарна база порожня. Оберіть початкові дані.</p><button onclick="initCloud(true)">Перенести дані з цього браузера</button><button onclick="initCloud(false)">Створити порожню базу</button><p>Резервну копію JSON можна відновити після запуску.</p>';status('Хмара: ще не налаштована');return}if(!validDB(r.data.data))throw Error('Невідомий формат даних');db=r.data.data;revision=r.data.version;remotePending=false;ready=true;cart=[];el('appnav').hidden=false;status('Хмара: підключено');show('receive')}catch(e){status('Хмара: помилка');main.innerHTML='<p>'+esc(e.message)+'</p><button onclick="loadCloud()">Повторити</button><button onclick="logout()">Вийти</button>'}finally{lock(false)}}
+async function loadCloud(){if(busy)return;const draft=ready&&el('cart')?Object.fromEntries(['code','seller','kind','buyer','buyerid','buyeraddress','rate'].map(k=>[k,el(k).value])):null;const wasReady=ready;lock(true);ready=false;el('appnav').hidden=true;try{let r=await cloud.from('gurt_data').select('data,version').eq('user_id',user.id).maybeSingle();if(r.error)throw r.error;if(!r.data){main.innerHTML='<h2>Перший запуск</h2><p>Хмарна база порожня. Оберіть початкові дані.</p><button onclick="initCloud(true)">Перенести дані з цього браузера</button><button onclick="initCloud(false)">Створити порожню базу</button><p>Резервну копію JSON можна відновити після запуску.</p>';status('Хмара: ще не налаштована');return}if(!validDB(r.data.data))throw Error('Невідомий формат даних');db=r.data.data;revision=r.data.version;remotePending=false;ready=true;el('appnav').hidden=false;status('Хмара: підключено');if(draft){show('sale');for(const k of Object.keys(draft))el(k).value=draft[k];el('buyerextra').hidden=draft.kind==='normal';if(draft.seller&&!el('seller').value)alert('Попередній ФОП недоступний. Виберіть продавця повторно.');if(cart.some(c=>{let p=db.products.find(x=>x.id===c.id);return !p||p.qty<c.qty||p.units!==c.units||p.price!==c.price}))alert('Залишок або параметри товару змінилися. Перевірте кошик перед продажем.');}else{cart=[];show('receive')}}catch(e){if(wasReady){ready=true;el('appnav').hidden=false;status('Хмара: помилка оновлення');alert(e.message);return;}status('Хмара: помилка');main.innerHTML='<p>'+esc(e.message)+'</p><button onclick="loadCloud()">Повторити</button><button onclick="logout()">Вийти</button>'}finally{lock(false)}}
 async function initCloud(useLocal){if(busy)return;if(!confirm('Створити початкову хмарну базу?'))return;lock(true);try{let data=useLocal?localOriginal:{products:[],sales:[],sellers:[],adjustments:[]};let r=await cloud.from('gurt_data').insert({user_id:user.id,data,version:1});if(r.error)throw r.error}catch(e){alert(e.message)}finally{lock(false)}await loadCloud()}
 async function boot(){loginPage();if(!cloud)return;try{let r=await cloud.auth.getUser();if(r.data.user){user=r.data.user;await loadCloud()}}catch(e){status('Хмара: помилка підключення')}}
 function show(page){
@@ -151,7 +151,7 @@ el('matches').innerHTML=db.products.filter(p=>p.qty>0&&(p.code===q||p.art===q)).
 function add(id){
 let p=db.products.find(x=>x.id===id);
 let c=cart.find(x=>x.id===id);
-if((c?.qty||0)>=p.qty)return alert('Недостатньо товару');
+if(!p||(c?.qty||0)>=p.qty)return alert('Недостатньо товару');
 if(c)c.qty++;
 else cart.push({...p,qty:1});
 renderCart();
@@ -159,8 +159,8 @@ el("code").value="";el("matches").innerHTML="";
 }
 function renderCart(){
 el('cart').innerHTML=(cart.length?"":"<p>Кошик порожній. Знайдіть товар і натисніть «Додати».</p>")+cart.map((p,i)=>`<p><b>${esc(p.name)} · арт. ${esc(p.art)} ${esc(p.color)}</b><br>
-<label for="cartqty${i}">Кількість ростовок (наявно: ${db.products.find(x=>x.id===p.id).qty})</label>
-<input id="cartqty${i}" type="number" inputmode="numeric" min="1" max="${db.products.find(x=>x.id===p.id).qty}" step="1" value="${p.qty}" onchange="setQty(${i},this.value)">
+<label for="cartqty${i}">Кількість ростовок (наявно: ${(db.products.find(x=>x.id===p.id)?.qty??0)})</label>
+<input id="cartqty${i}" type="number" inputmode="numeric" min="1" max="${(db.products.find(x=>x.id===p.id)?.qty??0)}" step="1" value="${p.qty}" onchange="setQty(${i},this.value)">
 <span id="lineqty${i}">${p.qty} рост. × ${p.units} шт. = ${p.qty*p.units} шт.</span><br>
 <span id="linesum${i}">$${money(p.qty*p.units*p.price)}</span>
 <button onclick="removeItem(${i})">−</button><button onclick="cart.splice(${i},1);renderCart()">Видалити</button>
@@ -168,7 +168,7 @@ el('cart').innerHTML=(cart.length?"":"<p>Кошик порожній. Знайд
 '<b id="carttotal">Разом: $'+money(cart.reduce((s,p)=>s+p.qty*p.units*p.price,0))+'</b>';
 }
 function setQty(i,value){
-let p=cart[i], q=Number(value), stock=db.products.find(x=>x.id===p.id).qty;
+let p=cart[i], q=Number(value), stock=(db.products.find(x=>x.id===p.id)?.qty??0);
 if(!Number.isInteger(q)||q<1||q>stock){
 el('cartqty'+i).value=p.qty;
 alert('Введіть цілу кількість від 1 до '+stock);
@@ -187,8 +187,8 @@ renderCart();
 async function finish(){
 let rate=num('rate');
 if(!cart.length||!Number.isFinite(rate)||rate<=0)return alert('Перевірте товар і курс');
-if(cart.some(c=>db.products.find(p=>p.id===c.id).qty<c.qty))return alert('Недостатньо залишку');
-let seller=db.sellers.find(x=>x.id===val('seller'));
+if(cart.some(c=>{let p=db.products.find(p=>p.id===c.id);return !p||p.qty<c.qty||p.units!==c.units||p.price!==c.price}))return alert('Недостатньо залишку або змінилася ціна чи ростовка. Видаліть змінений товар і додайте його повторно.');
+let seller=db.sellers.find(x=>x.id===val('seller')&&!x.inactive);
  if(val('kind')==='official'&&(!seller||!val('buyer')))return alert('Виберіть ФОП та введіть покупця');
  let s={seller:seller?{...seller}:null,kind:val('kind'),buyerid:val('buyerid'),buyeraddress:val('buyeraddress'),createdAt:new Date().toISOString(),date:new Date().toLocaleString('uk-UA'),buyer:val('buyer'),rate,items:cart,total:cart.reduce((s,p)=>s+p.qty*p.units*p.price,0)};
 let backup=JSON.stringify(db);
