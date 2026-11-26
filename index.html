@@ -22,7 +22,7 @@ td,th{padding:7px;border-bottom:1px solid #ddd;text-align:left}
 </head>
 <body>
 <h1>Гурт 1.0</h1>
-<small>Тестова версія 0.5.1</small>
+<small>Тестова версія 0.5.2</small>
 <nav>
 <button onclick="show('receive')">Приймання</button>
 <button onclick="show('sale')">Продаж</button>
@@ -79,10 +79,10 @@ if(page==='sale'){
 main.innerHTML=`
 <h2>Продаж товару</h2>
 <label>Штрихкод або артикул</label>
-<input id="code" onchange="findSale()" onkeydown="if(event.key==='Enter'){event.preventDefault();findSale()}"><button onclick="scan('findSale')">Камера</button>
+<input id="code" onkeydown="if(event.key==='Enter'){event.preventDefault();findSale()}"><button onclick="scan('findSale')">Камера</button>
 <button onclick="findSale()">Знайти</button>
 <div id="matches"></div>
-<div id="cart"></div>
+<hr><h3>Кошик</h3><div id="cart"></div>
 <label>Продавець</label><select id="seller"><option value="">Не вибрано</option>${db.sellers.filter(x=>!x.inactive).map(x=>`<option value="${esc(x.id)}">${esc(x.short||x.name)}</option>`).join('')}</select>
 <label>Тип накладної</label><select id="kind" onchange="el('buyerextra').hidden=this.value==='normal'"><option value="normal">Звичайна</option><option value="official">Офіційна видаткова</option></select>
 <label>Покупець</label><input id="buyer"><div id="buyerextra" hidden><label>ІПН / код покупця (за наявності)</label><input id="buyerid"><label>Адреса покупця (за потреби)</label><input id="buyeraddress"></div>
@@ -129,7 +129,7 @@ alert('Товар прийнято!');
 }
 function findSale(){
 let q=val('code');
-el('matches').innerHTML=db.products.filter(p=>p.qty>0&&(p.code===q||p.art===q)).map(p=>`<button onclick="add('${p.id}')">${esc(p.name)} ${esc(p.color)} · ${p.qty} рост.</button>`).join('')||'Товар не знайдено';
+el('matches').innerHTML=db.products.filter(p=>p.qty>0&&(p.code===q||p.art===q)).map(p=>`<button onclick="add('${p.id}')">Додати: ${esc(p.name)} · арт. ${esc(p.art)} ${esc(p.color)} · ${p.qty} рост.</button>`).join('')||'Товар не знайдено';
 }
 function add(id){
 let p=db.products.find(x=>x.id===id);
@@ -138,9 +138,10 @@ if((c?.qty||0)>=p.qty)return alert('Недостатньо товару');
 if(c)c.qty++;
 else cart.push({...p,qty:1});
 renderCart();
+el("code").value="";el("matches").innerHTML="";
 }
 function renderCart(){
-el('cart').innerHTML=cart.map((p,i)=>`<p>${esc(p.name)} ${esc(p.color)}<br>
+el('cart').innerHTML=(cart.length?"":"<p>Кошик порожній. Знайдіть товар і натисніть «Додати».</p>")+cart.map((p,i)=>`<p><b>${esc(p.name)} · арт. ${esc(p.art)} ${esc(p.color)}</b><br>
 <label for="cartqty${i}">Кількість ростовок (наявно: ${db.products.find(x=>x.id===p.id).qty})</label>
 <input id="cartqty${i}" type="number" inputmode="numeric" min="1" max="${db.products.find(x=>x.id===p.id).qty}" step="1" value="${p.qty}" onchange="setQty(${i},this.value)">
 <span id="lineqty${i}">${p.qty} рост. × ${p.units} шт. = ${p.qty*p.units} шт.</span><br>
